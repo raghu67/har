@@ -1,0 +1,125 @@
+---
+title: "Human Activity Recognition Analysis"
+author: "Raghurama Bhat"
+date: "April 25, 2015"
+output: html_document
+---
+
+## Introduction
+
+The goal of this document is to analyze the accelerometer data from several users performing wight lifting exercises and fit a machine learning model to the data that allows us to predict the activity they are performing by looking at the sensor data. The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+## Pre-processing 
+
+The training data for this project are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv.
+
+cursory inspection of the dataset reveals that there are many columns with NA values, Div/0 errors and blank values. We will drop all these columns and leave only the accelerometer data.
+
+
+```{r}
+#download the data files if it does not exist
+if (!file.exists("pml-training.csv") | !file.exists("pml-testing.csv")) {
+        download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv","pml_training.csv","curl",quiet=TRUE)
+        download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv","pml-testing.csv","curl",quiet=TRUE)
+}
+
+#Load the Training and Test Data
+train_data <- read.csv("pml-training.csv")
+test_data <- read.csv("pml-testing.csv")
+# First draw all the columns with NA values
+train_data <- train_data[,colSums(is.na(train_data)) ==0]
+test_data <- test_data[,colSums(is.na(test_data)) ==0]
+# Now select only the Accelerator data columns with valid data
+train_data <- subset(train_data, select=c(roll_belt:total_accel_belt,gyros_belt_x:magnet_arm_z,roll_dumbbell:yaw_dumbbell,total_accel_dumbbell:yaw_forearm,total_accel_forearm:classe))
+test_data <- subset(test_data, select=c(roll_belt:total_accel_belt,gyros_belt_x:magnet_arm_z,roll_dumbbell:yaw_dumbbell,total_accel_dumbbell:yaw_forearm,total_accel_forearm:problem_id))
+
+```
+
+## Model selection
+
+Since we have to do multiple class prediction our choices here are K Nearest Neighbor, Random Forest. We will try these two model fits and consider additional ones if necessary
+
+Since there is large amount of data, we need to enable the parallel processing using the doParallel package
+
+```{r}
+library(doParallel)
+library(caret)
+set.seed(400)
+
+#Enable parallel processing
+cl <- makeCluster(4)
+registerDoParallel(cl)
+
+#Split the training data into two partitions for training and validation
+splits <- createDataPartition(train_data$classe,2,0.8,FALSE)
+train_split <- train_data[splits,]
+test_split <- train_data[-splits,]
+
+```
+
+### K Nearest Neighbor Model
+
+Build a K Nearest Neighbor model using the caret package. knn algorithm requires the data to be normalized. Therefore, add the center and scale pre-proecessing to the train command.
+
+```{r}
+ctrl <- trainControl(method="repeatedcv",repeats = 3)
+
+knnFit <- train(classe ~ ., data = train_split, method = "knn", trControl = ctrl, preProcess = c("center","scale"))
+
+```
+
+Print the Model Object. 
+
+```{r}
+knnFit
+
+```
+
+Plot the Model Object
+```{r}
+plot(knnFit)
+
+```
+
+Using the model, we can now predict the classes for the test data and compute the out of sample error by generating the confusion matrix. Overall accuracy is We get the overall Accuracy of the model to be 98.58%. Therefore we can estimate the Out of Sample Error rate to be 1- Accuracy which is 1.42%.
+
+```{r}
+knnPredict <- predict(knnFit,newdata = test_split )
+confusionMatrix(knnPredict, test_split$classe)
+```
+
+### Random Forest Fit Model
+
+Build a Random Forest model using the caret package. 
+```{r}
+rfFit <- train(classe ~ ., data = train_split, method = "rf")
+```
+Print the Model Object.
+```{r}
+rfFit
+```
+Plot the Model Object
+```{r}
+plot(rfFit)
+```
+Using the model, we can now predict the classes for the test data and compute the out of sample error by generating the confusion matrix. Overall accuracy is We get the overall Accuracy of the model to be 99.87%. Therefore we can estimate the Out of Sample Error rate to be 1- Accuracy which is 0.13%.
+
+```{r}
+rfPredict <- predict(rfFit,newdata = test_split )
+confusionMatrix(rfPredict, test_split$classe )
+```
+
+### Conclusion.
+
+In this analysis, Both the K-Nearest Neighbor and Random Forest model have generated very good results and low estimated out of sample error rates. We will use the Random Forest model since it has the higher overall accuracy and lowest estimated out of sample error rate
+
+We can compute our final predictions using the Random Forest Model.
+```{r}
+rfTest <- predict(rfFit,newdata = test_data )
+```
